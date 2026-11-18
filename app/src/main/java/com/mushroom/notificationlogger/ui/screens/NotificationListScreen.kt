@@ -56,12 +56,18 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mushroom.notificationlogger.data.local.AppSummary
 import com.mushroom.notificationlogger.data.local.NotificationEntity
 import com.mushroom.notificationlogger.data.local.NotificationWithImages
+import com.mushroom.notificationlogger.service.BackgroundExecutionHelper
+import com.mushroom.notificationlogger.service.BackgroundRestrictionState
+import com.mushroom.notificationlogger.service.BatteryOptimizationState
 import com.mushroom.notificationlogger.service.NotificationAccessHelper
 import com.mushroom.notificationlogger.service.NotificationCaptureService
 import com.mushroom.notificationlogger.ui.MainViewModel
 import com.mushroom.notificationlogger.ui.components.AppIconImage
 import com.mushroom.notificationlogger.ui.components.AppIcons
+import com.mushroom.notificationlogger.ui.components.BackgroundRestrictionBanner
+import com.mushroom.notificationlogger.ui.components.BatteryOptimizationBanner
 import com.mushroom.notificationlogger.ui.components.FirstLaunchPermissionDialog
+import com.mushroom.notificationlogger.ui.components.ListenerConnectionStatusSection
 import com.mushroom.notificationlogger.ui.components.MushroomBadgeIcon
 import com.mushroom.notificationlogger.ui.components.PermissionBanner
 import com.mushroom.notificationlogger.ui.components.SavedNotificationThumbnail
@@ -74,6 +80,8 @@ import java.io.File
 fun NotificationListScreen(
     viewModel: MainViewModel,
     isNotificationAccessGranted: Boolean,
+    batteryOptimizationState: BatteryOptimizationState,
+    backgroundRestrictionState: BackgroundRestrictionState,
     onOpenNotificationDetail: (Long) -> Unit
 ) {
     val context = LocalContext.current
@@ -89,7 +97,15 @@ fun NotificationListScreen(
     val isExporting by viewModel.isExporting.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val excludeOngoing by viewModel.excludeOngoing.collectAsStateWithLifecycle()
+    val healthCheckRecord by viewModel.healthCheckRecord.collectAsStateWithLifecycle()
     val isServiceConnected by NotificationCaptureService.isServiceConnected.collectAsStateWithLifecycle()
+
+    val listenerConnectionState = remember(isNotificationAccessGranted, isServiceConnected) {
+        BackgroundExecutionHelper.resolveListenerConnectionState(
+            isAccessGranted = isNotificationAccessGranted,
+            isServiceConnected = isServiceConnected
+        )
+    }
 
     var hasPromptedPermissionDialog by rememberSaveable { mutableStateOf(false) }
     var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
@@ -99,6 +115,18 @@ fun NotificationListScreen(
     var pendingDeleteItem by remember { mutableStateOf<NotificationEntity?>(null) }
 
     val isFilterActive = selectedPackageName != null || searchQuery.isNotBlank()
+
+    fun triggerRebind() {
+        val requested = NotificationAccessHelper.ensureListenerBound(context)
+        coroutineScope.launch {
+            val message = if (requested) {
+                "通知リスナーの再接続を要求しました"
+            } else {
+                "通知へのアクセスを先に許可してください"
+            }
+            snackbarHostState.showSnackbar(message)
+        }
+    }
 
     fun triggerExport(onlyFiltered: Boolean) {
         viewModel.exportJson(
@@ -189,10 +217,34 @@ fun NotificationListScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            ListenerConnectionStatusSection(
+                connectionState = listenerConnectionState,
+                onRetryRebind = ::triggerRebind,
+                onOpenNotificationSettings = {
+                    NotificationAccessHelper.openNotificationAccessSettings(context)
+                }
+            )
+
             if (!isNotificationAccessGranted) {
                 PermissionBanner(
                     onOpenSettings = {
                         NotificationAccessHelper.openNotificationAccessSettings(context)
+                    }
+                )
+            }
+
+            if (backgroundRestrictionState.shouldWarn) {
+                BackgroundRestrictionBanner(
+                    onOpenAppInfo = {
+                        BackgroundExecutionHelper.openAppDetailsSettings(context)
+                    }
+                )
+            }
+
+            if (batteryOptimizationState.shouldShowBanner) {
+                BatteryOptimizationBanner(
+                    onRequestIgnoreBatteryOptimizations = {
+                        BackgroundExecutionHelper.requestIgnoreBatteryOptimizations(context)
                     }
                 )
             }
@@ -307,11 +359,21 @@ fun NotificationListScreen(
             excludeOngoing = excludeOngoing,
             isAccessGranted = isNotificationAccessGranted,
             isServiceConnected = isServiceConnected,
+            batteryOptimizationState = batteryOptimizationState,
+            backgroundRestrictionState = backgroundRestrictionState,
+            healthCheckRecord = healthCheckRecord,
             totalCount = totalCount,
             onSelectThemeMode = viewModel::setThemeMode,
             onToggleExcludeOngoing = viewModel::setExcludeOngoing,
+            onRequestRebind = ::triggerRebind,
             onOpenNotificationSettings = {
                 NotificationAccessHelper.openNotificationAccessSettings(context)
+            },
+            onRequestIgnoreBatteryOptimizations = {
+                BackgroundExecutionHelper.requestIgnoreBatteryOptimizations(context)
+            },
+            onOpenAppInfo = {
+                BackgroundExecutionHelper.openAppDetailsSettings(context)
             },
             onRequestDeleteAll = {
                 showSettingsDialog = false

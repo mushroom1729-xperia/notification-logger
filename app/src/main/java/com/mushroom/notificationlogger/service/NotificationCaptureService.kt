@@ -60,10 +60,14 @@ class NotificationCaptureService : NotificationListenerService() {
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
         _isServiceConnected.value = false
-        runCatching {
-            requestRebind(ComponentName(applicationContext, NotificationCaptureService::class.java))
-        }.onFailure { err ->
-            Log.w(TAG, "Failed to request listener rebind", err)
+        if (NotificationAccessHelper.isNotificationAccessGranted(applicationContext)) {
+            runCatching {
+                requestRebind(
+                    ComponentName(applicationContext, NotificationCaptureService::class.java)
+                )
+            }.onFailure { err ->
+                Log.w(TAG, "Failed to request listener rebind", err)
+            }
         }
     }
 

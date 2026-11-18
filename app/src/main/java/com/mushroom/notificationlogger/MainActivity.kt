@@ -11,15 +11,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
@@ -28,22 +22,42 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.mushroom.notificationlogger.data.preferences.ThemeMode
+import com.mushroom.notificationlogger.service.BackgroundExecutionHelper
+import com.mushroom.notificationlogger.service.BackgroundRestrictionState
+import com.mushroom.notificationlogger.service.BatteryOptimizationState
+import com.mushroom.notificationlogger.service.ListenerHealthCheckWorker
 import com.mushroom.notificationlogger.service.NotificationAccessHelper
+import com.mushroom.notificationlogger.service.NotificationCaptureService
+import com.mushroom.notificationlogger.service.SystemHealthSnapshot
 import com.mushroom.notificationlogger.ui.DetailViewModel
 import com.mushroom.notificationlogger.ui.MainViewModel
 import com.mushroom.notificationlogger.ui.screens.NotificationDetailScreen
 import com.mushroom.notificationlogger.ui.screens.NotificationListScreen
 import com.mushroom.notificationlogger.ui.theme.NotificationLoggerTheme
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class MainActivity : ComponentActivity() {
+
+    private val systemHealthState = MutableStateFlow(
+        SystemHealthSnapshot(
+            isNotificationAccessGranted = false,
+            isServiceConnected = false,
+            batteryOptimizationState = BatteryOptimizationState.IGNORED,
+            backgroundRestrictionState = BackgroundRestrictionState.UNRESTRICTED
+        )
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        refreshSystemStatus(ensureBoundIfPermitted = true)
+        ListenerHealthCheckWorker.schedulePeriodicCheck(this)
 
         setContent {
             val mainViewModel: MainViewModel = viewModel(factory = MainViewModel.Factory)
             val themeMode by mainViewModel.themeMode.collectAsStateWithLifecycle()
+            val systemHealth by systemHealthState.collectAsStateWithLifecycle()
+
             val systemDark = isSystemInDarkTheme()
             val useDark = when (themeMode) {
                 ThemeMode.SYSTEM -> systemDark
@@ -73,35 +87,37 @@ class MainActivity : ComponentActivity() {
                 onDispose {}
             }
 
-            var isAccessGranted by remember {
-                mutableStateOf(NotificationAccessHelper.isNotificationAccessGranted(this))
-            }
-            val lifecycleOwner = LocalLifecycleOwner.current
-            DisposableEffect(lifecycleOwner) {
-                val observer = LifecycleEventObserver { _, event ->
-                    if (event == Lifecycle.Event.ON_RESUME) {
-                        val granted =
-                            NotificationAccessHelper.isNotificationAccessGranted(this@MainActivity)
-                        isAccessGranted = granted
-                        if (granted) {
-                            NotificationAccessHelper.ensureListenerBound(this@MainActivity)
-                        }
-                    }
-                }
-                lifecycleOwner.lifecycle.addObserver(observer)
-                onDispose {
-                    lifecycleOwner.lifecycle.removeObserver(observer)
-                }
-            }
-
             NotificationLoggerTheme(themeMode = themeMode) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     NotificationLoggerNavHost(
                         mainViewModel = mainViewModel,
-                        isNotificationAccessGranted = isAccessGranted
+                        systemHealth = systemHealth
                     )
                 }
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshSystemStatus(ensureBoundIfPermitted = true)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            refreshSystemStatus(ensureBoundIfPermitted = false)
+        }
+    }
+
+    private fun refreshSystemStatus(ensureBoundIfPermitted: Boolean) {
+        val snapshot = BackgroundExecutionHelper.readSystemHealthSnapshot(
+            context = this,
+            isServiceConnected = NotificationCaptureService.isServiceConnected.value
+        )
+        systemHealthState.value = snapshot
+        if (ensureBoundIfPermitted && snapshot.isNotificationAccessGranted) {
+            NotificationAccessHelper.ensureListenerBound(this)
         }
     }
 }
@@ -109,7 +125,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun NotificationLoggerNavHost(
     mainViewModel: MainViewModel,
-    isNotificationAccessGranted: Boolean
+    systemHealth: SystemHealthSnapshot
 ) {
     val navController = rememberNavController()
 
@@ -120,7 +136,9 @@ private fun NotificationLoggerNavHost(
         composable(route = ROUTE_LIST) {
             NotificationListScreen(
                 viewModel = mainViewModel,
-                isNotificationAccessGranted = isNotificationAccessGranted,
+                isNotificationAccessGranted = systemHealth.isNotificationAccessGranted,
+                batteryOptimizationState = systemHealth.batteryOptimizationState,
+                backgroundRestrictionState = systemHealth.backgroundRestrictionState,
                 onOpenNotificationDetail = { id ->
                     navController.navigate("detail/$id") {
                         launchSingleTop = true

@@ -14,6 +14,7 @@ class ServiceRecoveryReceiver : BroadcastReceiver() {
             action == Intent.ACTION_MY_PACKAGE_REPLACED
         ) {
             NotificationAccessHelper.ensureListenerBound(context)
+            ListenerHealthCheckWorker.schedulePeriodicCheck(context)
         }
     }
 }

@@ -10,6 +10,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.mushroom.notificationlogger.NotificationLoggerApp
 import com.mushroom.notificationlogger.data.local.AppSummary
 import com.mushroom.notificationlogger.data.local.NotificationWithImages
+import com.mushroom.notificationlogger.data.preferences.HealthCheckRecord
 import com.mushroom.notificationlogger.data.preferences.ThemeMode
 import com.mushroom.notificationlogger.data.preferences.UserPreferencesRepository
 import com.mushroom.notificationlogger.data.repository.NotificationRepository
@@ -88,6 +89,14 @@ class MainViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = true
         )
+
+    val healthCheckRecord: StateFlow<HealthCheckRecord?> =
+        preferencesRepository.healthCheckRecordFlow
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = null
+            )
 
     fun onSearchQueryChange(newQuery: String) {
         _searchQuery.value = newQuery

@@ -40,14 +40,15 @@ object NotificationAccessHelper {
         }
     }
 
-    fun ensureListenerBound(context: Context) {
-        if (!isNotificationAccessGranted(context)) return
-        runCatching {
+    fun ensureListenerBound(context: Context): Boolean {
+        if (!isNotificationAccessGranted(context)) return false
+        return runCatching {
             val componentName = ComponentName(
                 context.applicationContext,
                 NotificationCaptureService::class.java
             )
             NotificationListenerService.requestRebind(componentName)
-        }
+            true
+        }.getOrDefault(false)
     }
 }
