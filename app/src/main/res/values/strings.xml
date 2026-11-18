@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Notification Logger</string>
+    <string name="listener_service_label">Notification Logger 通知記録サービス</string>
+    <string name="export_chooser_title">通知ログ (JSON) を共有</string>
+</resources>
